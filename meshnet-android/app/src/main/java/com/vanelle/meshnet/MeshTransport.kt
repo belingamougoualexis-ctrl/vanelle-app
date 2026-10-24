@@ -17,17 +17,21 @@ class MeshTransport {
     companion object { const val PORT = 47474 }
     private val executor = Executors.newCachedThreadPool()
     @Volatile private var server: ServerSocket? = null
+    @Volatile private var serverStarting = false
     @Volatile private var socket: Socket? = null
     @Volatile private var writer: PrintWriter? = null
     @Volatile private var closed = false
 
     @Synchronized
     fun startGroupOwner(onMessage: (String) -> Unit, onStatus: (String) -> Unit) {
+        if (serverStarting || server != null) return
         closed = false
+        serverStarting = true
         executor.execute {
             try {
                 val ss = ServerSocket(PORT)
                 server = ss
+                serverStarting = false
                 onStatus("En attente d’un pair sur le réseau local")
                 while (!closed) {
                     val peer = ss.accept()
@@ -35,20 +39,31 @@ class MeshTransport {
                 }
             } catch (e: Exception) {
                 if (!closed) onStatus("Transport local indisponible : ${e.javaClass.simpleName}")
+            } finally {
+                server = null
+                serverStarting = false
             }
         }
     }
 
     fun connect(host: String, onMessage: (String) -> Unit, onStatus: (String) -> Unit) {
         closed = false
+        if (socket?.isConnected == true && socket?.isClosed == false) return
         executor.execute {
-            try {
-                val peer = Socket()
-                peer.connect(InetSocketAddress(host, PORT), 8000)
-                attach(peer, onMessage, onStatus)
-            } catch (e: Exception) {
-                if (!closed) onStatus("Connexion de messagerie impossible : ${e.javaClass.simpleName}")
+            var lastError: Exception? = null
+            repeat(5) { attempt ->
+                if (closed || socket?.isConnected == true) return@execute
+                try {
+                    val peer = Socket()
+                    peer.connect(InetSocketAddress(host, PORT), 2500)
+                    attach(peer, onMessage, onStatus)
+                    return@execute
+                } catch (e: Exception) {
+                    lastError = e
+                    if (attempt < 4) try { Thread.sleep(500) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); return@execute }
+                }
             }
+            if (!closed) onStatus("Connexion de messagerie impossible : ${lastError?.javaClass?.simpleName ?: "erreur réseau"}")
         }
     }
 
