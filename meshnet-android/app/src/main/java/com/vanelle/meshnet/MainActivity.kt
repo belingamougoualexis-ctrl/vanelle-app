@@ -205,12 +205,18 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun runLocalSimulation() {
-        val seed = UUID.randomUUID().toString()
-        val packet = "VAMP|$seed|source=A|destination=C|ttl=4|payload=hello"
-        val digest = MessageDigest.getInstance("SHA-256").digest(packet.toByteArray()).joinToString("") { "%02x".format(it) }.take(16)
-        val deduplicated = setOf(seed, seed).size == 1
-        demoResult = "SIMULATION LOCALE · paquet créé, empreinte SHA-256 $digest · TTL=4 · déduplication ${if (deduplicated) "OK" else "ÉCHEC"}. Aucune radio utilisée."
-        status = "Test logiciel local terminé · aucun appareil distant testé"
+        val original = VampPacket.create(source = "A", destination = "C", payload = "hello Vanelle", ttl = 4)
+        val encoded = original.encode()
+        val decoded = VampPacket.decode(encoded)
+        val forwarded = decoded?.forwarded()
+        val cache = PacketDeduplicator()
+        val firstAccepted = cache.firstTime(original.id)
+        val duplicateRejected = !cache.firstTime(original.id)
+        val digest = MessageDigest.getInstance("SHA-256").digest(encoded.toByteArray())
+            .joinToString("") { "%02x".format(it) }.take(16)
+        val passed = decoded?.payload == "hello Vanelle" && forwarded?.ttl == 3 && firstAccepted && duplicateRejected
+        demoResult = "SIMULATION LOGICIELLE · aller-retour paquet ${if (decoded != null) "OK" else "ÉCHEC"} · TTL après relais ${forwarded?.ttl ?: "expiré"} · doublon ${if (duplicateRejected) "bloqué" else "accepté"} · SHA-256 $digest. Aucune radio utilisée."
+        status = if (passed) "Tests logiciels VAMP réussis · aucun appareil distant testé" else "Échec du test logiciel VAMP"
     }
 
     override fun onResume() {
