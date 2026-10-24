@@ -30,7 +30,8 @@ data class VampPacket(
         fun create(source: String, destination: String, payload: String, ttl: Int = 8): VampPacket =
             VampPacket(UUID.randomUUID().toString(), source, destination, ttl, System.currentTimeMillis(), payload)
 
-        fun decode(encoded: String): VampPacket? = try {
+        fun decode(encoded: String): VampPacket? {
+            return try {
             val fields = encoded.split("|", limit = 7)
             if (fields.size != 7 || fields[0] != VERSION) return null
             val ttl = fields[4].toIntOrNull() ?: return null
@@ -38,8 +39,9 @@ data class VampPacket(
             val payloadBytes = Base64.getUrlDecoder().decode(fields[6])
             if (ttl !in 0..32 || payloadBytes.size > MAX_PAYLOAD_BYTES) return null
             VampPacket(fields[1], fields[2], fields[3], ttl, timestamp, payloadBytes.toString(Charsets.UTF_8))
-        } catch (_: Exception) {
-            null
+            } catch (_: Exception) {
+                null
+            }
         }
     }
 }
