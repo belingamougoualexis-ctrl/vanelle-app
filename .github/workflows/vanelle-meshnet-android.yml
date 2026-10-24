@@ -1,0 +1,54 @@
+name: Vanelle MeshNet Android
+
+on:
+  push:
+    branches: [main, feature/vanelle-meshnet-android]
+    paths:
+      - "meshnet-android/**"
+      - ".github/workflows/vanelle-meshnet-android.yml"
+  pull_request:
+    paths:
+      - "meshnet-android/**"
+      - ".github/workflows/vanelle-meshnet-android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: meshnet-android
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Install SDK packages
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Run unit tests
+        run: gradle testDebugUnitTest
+      - name: Build debug APK
+        run: gradle assembleDebug
+      - name: Run lint
+        run: gradle lintDebug
+      - name: Upload APK and reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vanelle-meshnet-android-mvp
+          path: |
+            meshnet-android/app/build/outputs/apk/debug/*.apk
+            meshnet-android/app/build/reports/lint-results-debug.html
+            meshnet-android/app/build/test-results/testDebugUnitTest/*.xml
+          if-no-files-found: warn
+          retention-days: 14
