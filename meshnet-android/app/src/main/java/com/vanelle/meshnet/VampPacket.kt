@@ -1,6 +1,6 @@
 package com.vanelle.meshnet
 
-import android.util.Base64
+import java.util.Base64
 import java.util.LinkedHashMap
 import java.util.UUID
 
@@ -16,7 +16,7 @@ data class VampPacket(
     fun encode(): String {
         require(id.length <= 80 && source.length <= 80 && destination.length <= 80)
         require(ttl in 0..32 && payload.toByteArray(Charsets.UTF_8).size <= MAX_PAYLOAD_BYTES)
-        val body = Base64.encodeToString(payload.toByteArray(Charsets.UTF_8), Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
+        val body = Base64.getUrlEncoder().withoutPadding().encodeToString(payload.toByteArray(Charsets.UTF_8))
         return listOf(VERSION, id, source, destination, ttl.toString(), createdAtMillis.toString(), body).joinToString("|")
     }
 
@@ -35,7 +35,7 @@ data class VampPacket(
             if (fields.size != 7 || fields[0] != VERSION) return null
             val ttl = fields[4].toIntOrNull() ?: return null
             val timestamp = fields[5].toLongOrNull() ?: return null
-            val payloadBytes = Base64.decode(fields[6], Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
+            val payloadBytes = Base64.getUrlDecoder().decode(fields[6])
             if (ttl !in 0..32 || payloadBytes.size > MAX_PAYLOAD_BYTES) return null
             VampPacket(fields[1], fields[2], fields[3], ttl, timestamp, payloadBytes.toString(Charsets.UTF_8))
         } catch (_: Exception) {
