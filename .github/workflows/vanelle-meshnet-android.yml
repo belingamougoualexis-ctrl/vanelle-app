@@ -12,6 +12,10 @@ on:
       - ".github/workflows/vanelle-meshnet-android.yml"
   workflow_dispatch:
 
+concurrency:
+  group: vanelle-meshnet-android-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -36,9 +40,9 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
-          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+          packages: 'platform-tools platforms;android-35 platforms;android-34 build-tools;35.0.0'
       - name: Install SDK packages
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+        run: sdkmanager "platforms;android-35" "platforms;android-34" "build-tools;35.0.0"
       - name: Run unit tests
         run: gradle testDebugUnitTest
       - name: Build debug APK
@@ -48,10 +52,12 @@ jobs:
       - name: Run Android emulator UI tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: 34
           arch: x86_64
           profile: pixel_2
           working-directory: meshnet-android
+          emulator-options: -no-window -no-audio -no-boot-anim
+          disable-animations: true
           script: gradle connectedDebugAndroidTest
       - name: Run lint
         run: gradle lintDebug
@@ -65,5 +71,6 @@ jobs:
             meshnet-android/app/build/outputs/apk/release/*.apk
             meshnet-android/app/build/reports/lint-results-debug.html
             meshnet-android/app/build/test-results/testDebugUnitTest/*.xml
+            meshnet-android/app/build/outputs/androidTest-results/connected/**
           if-no-files-found: warn
           retention-days: 14
