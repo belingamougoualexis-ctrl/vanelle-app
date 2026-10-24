@@ -43,15 +43,26 @@ jobs:
         run: gradle testDebugUnitTest
       - name: Build debug APK
         run: gradle assembleDebug
+      - name: Build minified release variant
+        run: gradle assembleRelease
+      - name: Run Android emulator UI tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_2
+          working-directory: meshnet-android
+          script: gradle connectedDebugAndroidTest
       - name: Run lint
         run: gradle lintDebug
       - name: Upload APK and reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: vanelle-meshnet-android-mvp
+          name: vanelle-meshnet-android-builds
           path: |
             meshnet-android/app/build/outputs/apk/debug/*.apk
+            meshnet-android/app/build/outputs/apk/release/*.apk
             meshnet-android/app/build/reports/lint-results-debug.html
             meshnet-android/app/build/test-results/testDebugUnitTest/*.xml
           if-no-files-found: warn
