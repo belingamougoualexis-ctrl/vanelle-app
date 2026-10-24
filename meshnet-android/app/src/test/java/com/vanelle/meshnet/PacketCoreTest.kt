@@ -1,23 +1,39 @@
 package com.vanelle.meshnet
 
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
+import org.junit.Assert.*
 import org.junit.Test
-import java.security.MessageDigest
 
 class PacketCoreTest {
-    @Test fun sha256IsStableForSamePacket() {
-        val packet = "VAMP|id-1|A|B|ttl=4|hello"
-        fun digest() = MessageDigest.getInstance("SHA-256").digest(packet.toByteArray())
-            .joinToString("") { "%02x".format(it) }
-        assertEquals(digest(), digest())
-        assertEquals(64, digest().length)
+    @Test fun packetRoundTripsUtf8Payload() {
+        val packet = VampPacket("packet-1", "node-a", "node-c", 4, 123L, "Salut 👋 réseau")
+        val decoded = VampPacket.decode(packet.encode())
+        assertNotNull(decoded)
+        assertEquals(packet, decoded)
     }
 
-    @Test fun ttlMustExpireAfterFourHops() {
-        var ttl = 4
-        repeat(4) { ttl-- }
-        assertEquals(0, ttl)
-        assertTrue(ttl <= 0)
+    @Test fun forwardingDecrementsTtlAndExpiresAtOne() {
+        val packet = VampPacket("p", "a", "c", 4, 123L, "data")
+        assertEquals(3, packet.forwarded()?.ttl)
+        assertNull(packet.copy(ttl = 1).forwarded())
+    }
+
+    @Test fun duplicatePacketsAreRejected() {
+        val cache = PacketDeduplicator(2)
+        assertTrue(cache.firstTime("a"))
+        assertFalse(cache.firstTime("a"))
+        assertTrue(cache.firstTime("b"))
+    }
+
+    @Test fun malformedPacketsAreRejected() {
+        assertNull(VampPacket.decode("not-a-vamp-packet"))
+        assertNull(VampPacket.decode("VAMP1|id|source|dest|999|123|abc"))
+    }
+
+    @Test fun deduplicatorRemainsBounded() {
+        val cache = PacketDeduplicator(2)
+        cache.firstTime("a")
+        cache.firstTime("b")
+        cache.firstTime("c")
+        assertTrue(cache.firstTime("a"))
     }
 }
