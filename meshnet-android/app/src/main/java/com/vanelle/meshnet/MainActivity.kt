@@ -20,11 +20,17 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardActions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,6 +61,9 @@ class MainActivity : ComponentActivity() {
     private var isDiscovering by mutableStateOf(false)
     private var demoResult by mutableStateOf("Aucun test local lancé")
     private var permissionGranted by mutableStateOf(false)
+    private val transport = MeshTransport()
+    private var chatMessages by mutableStateOf<List<String>>(emptyList())
+    private var draft by mutableStateOf("")
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
         permissionGranted = requiredPermissions().all { p ->
@@ -73,9 +82,18 @@ class MainActivity : ComponentActivity() {
         registerP2pReceiver()
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(primary = Cyan, secondary = Violet, background = Ink, surface = Panel, onBackground = Color.White, onSurface = Color.White)) {
-                MeshNetScreen(status, wifiDirectState, connectionState, peers, isDiscovering, demoResult, permissionGranted,
+                MeshNetScreen(status, wifiDirectState, connectionState, peers, isDiscovering, demoResult, permissionGranted, chatMessages, draft,
                     { requestRequiredPermissions() }, { if (permissionGranted) discoverPeers() else requestRequiredPermissions() },
-                    { requestPeers() }, { connectTo(it) }, { disconnect() }, { runLocalSimulation() })
+                    { requestPeers() }, { connectTo(it) }, { disconnect() }, { runLocalSimulation() },
+                    { draft = it }, {
+                        val message = draft.trim()
+                        if (message.isNotEmpty()) {
+                            if (transport.send(message)) {
+                                chatMessages = (chatMessages + "Moi : $message").takeLast(100)
+                                draft = ""
+                            } else status = "Aucun transport de messagerie connecté. Connecte-toi à un appareil compatible."
+                        }
+                    })
             }
         }
     }
@@ -111,6 +129,22 @@ class MainActivity : ComponentActivity() {
                         connectionState = if (network?.isConnected == true) "Connecté · liaison système établie" else "Aucune connexion"
                         if (network?.isConnected == true) manager?.requestConnectionInfo(channel) { info: WifiP2pInfo ->
                             connectionState = if (info.groupFormed) "Groupe P2P établi" else "Connexion en négociation"
+                            if (info.groupFormed) {
+                                if (info.isGroupOwner) {
+                                    transport.startGroupOwner(
+                                        { message -> runOnUiThread { chatMessages = (chatMessages + "Pair : $message").takeLast(100) } },
+                                        { value -> runOnUiThread { connectionState = value } }
+                                    )
+                                } else {
+                                    info.groupOwnerAddress?.hostAddress?.let { host ->
+                                        transport.connect(
+                                            host,
+                                            { message -> runOnUiThread { chatMessages = (chatMessages + "Pair : $message").takeLast(100) } },
+                                            { value -> runOnUiThread { connectionState = value } }
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -163,6 +197,7 @@ class MainActivity : ComponentActivity() {
 
     @Suppress("MissingPermission")
     private fun disconnect() {
+        transport.close()
         manager?.removeGroup(channel, object : WifiP2pManager.ActionListener {
             override fun onSuccess() { connectionState = "Aucune connexion"; status = "Groupe P2P fermé" }
             override fun onFailure(reason: Int) { status = "Impossible de fermer le groupe (code $reason)" }
@@ -188,6 +223,7 @@ class MainActivity : ComponentActivity() {
             try { unregisterReceiver(receiver) } catch (_: IllegalArgumentException) {}
             receiverRegistered = false
         }
+        transport.shutdown()
         super.onDestroy()
     }
 }
@@ -195,13 +231,14 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun MeshNetScreen(
     status: String, wifiDirectState: String, connectionState: String, peers: List<WifiP2pDevice>,
-    isDiscovering: Boolean, demoResult: String, permissionGranted: Boolean,
+    isDiscovering: Boolean, demoResult: String, permissionGranted: Boolean, chatMessages: List<String>, draft: String,
     onPermissions: () -> Unit, onScan: () -> Unit, onRefresh: () -> Unit,
-    onConnect: (WifiP2pDevice) -> Unit, onDisconnect: () -> Unit, onSimulation: () -> Unit
+    onConnect: (WifiP2pDevice) -> Unit, onDisconnect: () -> Unit, onSimulation: () -> Unit,
+    onDraftChange: (String) -> Unit, onSend: () -> Unit
 ) {
     Surface(modifier = Modifier.fillMaxSize(), color = Ink) {
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF101A31), Ink, Color(0xFF090D18))))) {
-            Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Box(Modifier.size(46.dp).background(Brush.linearGradient(listOf(Cyan, Violet)), RoundedCornerShape(15.dp)), contentAlignment = Alignment.Center) {
                         Text("V", color = Ink, fontSize = 25.sp, fontWeight = FontWeight.Black)
@@ -211,12 +248,12 @@ private fun MeshNetScreen(
                         Text("MeshNet", fontSize = 27.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
                     }
                     Box(Modifier.background(Color(0xFF19352F), CircleShape).padding(horizontal = 11.dp, vertical = 7.dp)) {
-                        Text("MVP 0.1", color = Cyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("BETA", color = Cyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
                     Text("Un réseau. Sans dépendance au cloud.", color = Color.White, fontSize = 22.sp, lineHeight = 27.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Découvre les appareils proches et teste le moteur de paquets VAMP.", color = Muted, fontSize = 13.sp, lineHeight = 19.sp)
+                    Text("Communication locale entre appareils compatibles. Aucune portée longue distance n’est promise.", color = Muted, fontSize = 13.sp, lineHeight = 19.sp)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     MetricCard("RADIO", wifiDirectState, Modifier.weight(1f))
@@ -245,7 +282,7 @@ private fun MeshNetScreen(
                     TextButton(onClick = onRefresh) { Text("Actualiser", color = Cyan) }
                 }
                 if (peers.isEmpty()) {
-                    Box(Modifier.fillMaxWidth().weight(1f).background(Color(0x331D2940), RoundedCornerShape(18.dp)).padding(18.dp), contentAlignment = Alignment.Center) {
+                    Box(Modifier.fillMaxWidth().background(Color(0x331D2940), RoundedCornerShape(18.dp)).padding(18.dp), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("⌁", color = Violet, fontSize = 38.sp)
                             Text("Aucun appareil affiché", color = Color.White, fontWeight = FontWeight.Medium)
@@ -253,8 +290,8 @@ private fun MeshNetScreen(
                         }
                     }
                 } else {
-                    LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(peers, key = { it.deviceAddress }) { peer ->
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        peers.forEach { peer ->
                             Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().clickable { onConnect(peer) }) {
                                 Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Box(Modifier.size(38.dp).background(Color(0xFF26314C), CircleShape), contentAlignment = Alignment.Center) { Text("↗", color = Cyan, fontSize = 20.sp) }
@@ -266,6 +303,30 @@ private fun MeshNetScreen(
                                 }
                             }
                         }
+                    }
+                }
+                Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(18.dp)) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Messages locaux", color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                            Text("PAIR À PAIR", color = Violet, fontSize = 10.sp, letterSpacing = 1.sp, fontWeight = FontWeight.Bold)
+                        }
+                        if (chatMessages.isEmpty()) Text("Connecte deux appareils compatibles pour échanger des messages sur le réseau local.", color = Muted, fontSize = 12.sp, lineHeight = 17.sp)
+                        chatMessages.takeLast(4).forEach { line -> Text(line, color = Color.White, fontSize = 12.sp, lineHeight = 17.sp) }
+                        OutlinedTextField(
+                            value = draft, onValueChange = onDraftChange, modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("Écrire un message…", color = Muted) }, singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White, unfocusedTextColor = Color.White,
+                                focusedBorderColor = Cyan, unfocusedBorderColor = Muted, cursorColor = Cyan
+                            ),
+                            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Send),
+                            keyboardActions = KeyboardActions(onSend = { onSend() })
+                        )
+                        Button(onClick = onSend, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Ink)) {
+                            Text("Envoyer sur le réseau local", fontWeight = FontWeight.Bold)
+                        }
+                        Text("Le transport actuel est local et non chiffré. N’envoie pas de données sensibles.", color = Muted, fontSize = 10.sp, lineHeight = 14.sp)
                     }
                 }
                 Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF17172C)), shape = RoundedCornerShape(18.dp)) {
