@@ -93,6 +93,7 @@ class MainActivity : ComponentActivity() {
         } else permissionLauncher.launch(missing.toTypedArray())
     }
 
+    @Suppress("DEPRECATION")
     private fun registerP2pReceiver() {
         if (receiverRegistered) return
         receiver = object : BroadcastReceiver() {
@@ -120,8 +121,9 @@ class MainActivity : ComponentActivity() {
             addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION)
             addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION)
         }
-        if (Build.VERSION.SDK_INT >= 33) registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        else @Suppress("DEPRECATION") registerReceiver(receiver, filter)
+        val p2pReceiver = receiver ?: return
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(p2pReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        else registerReceiver(p2pReceiver, filter)
         receiverRegistered = true
     }
 
